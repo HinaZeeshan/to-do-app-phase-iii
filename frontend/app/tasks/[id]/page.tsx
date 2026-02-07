@@ -9,7 +9,7 @@ import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { tasks, loading, error } = useTasks();
+  const { tasks, loading, error, updateTask, deleteTask, toggleTaskCompletion } = useTasks();
   const [task, setTask] = useState<TodoItem | undefined>(undefined);
 
   useEffect(() => {
@@ -50,7 +50,12 @@ export default function TaskDetailPage() {
       <div className="px-4 py-6 sm:px-0">
         <h1 className="text-3xl font-bold text-gray-900 mb-6">Task Details</h1>
         <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-          <TaskCard task={task} />
+          <TaskCard
+            task={task}
+            onUpdate={updateTask}
+            onDelete={deleteTask}
+            onToggle={toggleTaskCompletion}
+          />
         </div>
       </div>
     </div>
