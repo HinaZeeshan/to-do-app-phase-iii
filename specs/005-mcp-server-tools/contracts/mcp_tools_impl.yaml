@@ -1,0 +1,255 @@
+# MCP Tool Implementation Contracts
+# Spec-5 implementation of MCP tools consumed by Spec-4 AI agent
+
+mcp_tools_implementation:
+  description: |
+    MCP tools are async Python functions that wrap existing TaskService business logic.
+    Tools enforce user-level authorization, persist to database, and return structured responses.
+
+    Implementation: backend/src/mcp/tools/
+    Consumer: Spec-4 AI agent (backend/src/agent/tool_mapper.py)
+
+  add_task:
+    function_signature: "async def add_task(user_id: UUID, title: str, db: AsyncSession) -> dict"
+    description: Create a new task for the authenticated user
+    implementation:
+      wrapper: TaskService.create_task
+      authorization: user_id passed as authenticated_user_id (MCP tools trust agent)
+      validation: Title non-empty, max 500 chars
+      persistence: Task persisted to database via TaskService
+      return: task.model_dump() (dict with id, user_id, title, is_completed, timestamps)
+    input:
+      user_id: UUID (authenticated from upstream)
+      title: str (1-500 chars, non-empty)
+      db: AsyncSession (database session from agent)
+    output:
+      dict: Task object serialized (id, user_id, title, is_completed, created_at, updated_at)
+    errors:
+      ValidationError: Title empty or exceeds 500 chars
+      DatabaseError: Database persistence failed
+    example:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        title: "buy milk"
+      output:
+        id: "550e8400-e29b-41d4-a716-446655440000"
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        title: "buy milk"
+        is_completed: false
+        created_at: "2026-02-07T10:00:00Z"
+        updated_at: "2026-02-07T10:00:00Z"
+
+  list_tasks:
+    function_signature: "async def list_tasks(user_id: UUID, filter: Optional[str], db: AsyncSession) -> list"
+    description: Retrieve all tasks for the authenticated user with optional filtering
+    implementation:
+      wrapper: TaskService.list_tasks
+      authorization: Filter by user_id (handled by TaskService)
+      filtering: Apply is_completed filter if specified
+      sorting: Created_at descending (newest first)
+      return: List of task.model_dump() dicts
+    input:
+      user_id: UUID (authenticated from upstream)
+      filter: Optional[str] ("all", "pending", "completed", default="all")
+      db: AsyncSession (database session from agent)
+    output:
+      list: Array of Task objects serialized as dicts
+    errors:
+      ValidationError: Invalid filter value
+      DatabaseError: Database query failed
+    example:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        filter: "pending"
+      output:
+        - id: "550e8400-e29b-41d4-a716-446655440000"
+          title: "buy milk"
+          is_completed: false
+        - id: "660e8400-e29b-41d4-a716-446655440000"
+          title: "call dentist"
+          is_completed: false
+
+  complete_task:
+    function_signature: "async def complete_task(user_id: UUID, task_id: UUID, db: AsyncSession) -> dict"
+    description: Mark a task as completed
+    implementation:
+      wrapper: TaskService.complete_task
+      authorization: TaskService validates user owns task
+      update: Set is_completed=True, completed_at=now()
+      return: Updated task.model_dump()
+    input:
+      user_id: UUID (authenticated from upstream)
+      task_id: UUID (task to complete)
+      db: AsyncSession (database session from agent)
+    output:
+      dict: Updated Task object serialized
+    errors:
+      TaskNotFoundError: Task not found or user doesn't own it
+      ValidationError: Invalid UUID format
+      DatabaseError: Database update failed
+    example:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        task_id: "550e8400-e29b-41d4-a716-446655440000"
+      output:
+        id: "550e8400-e29b-41d4-a716-446655440000"
+        title: "buy milk"
+        is_completed: true
+        completed_at: "2026-02-07T10:30:00Z"
+
+  delete_task:
+    function_signature: "async def delete_task(user_id: UUID, task_id: UUID, db: AsyncSession) -> None"
+    description: Permanently delete a task
+    implementation:
+      wrapper: TaskService.delete_task
+      authorization: TaskService validates user owns task
+      persistence: Task removed from database
+      return: None (success confirmation)
+    input:
+      user_id: UUID (authenticated from upstream)
+      task_id: UUID (task to delete)
+      db: AsyncSession (database session from agent)
+    output:
+      None: No return value on success
+    errors:
+      TaskNotFoundError: Task not found or user doesn't own it
+      ValidationError: Invalid UUID format
+      DatabaseError: Database delete failed
+    example:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        task_id: "550e8400-e29b-41d4-a716-446655440000"
+      output: null
+
+  update_task:
+    function_signature: "async def update_task(user_id: UUID, task_id: UUID, new_title: str, db: AsyncSession) -> dict"
+    description: Update a task's title
+    implementation:
+      wrapper: TaskService.update_task
+      authorization: TaskService validates user owns task
+      update: Set title=new_title, updated_at=now()
+      return: Updated task.model_dump()
+    input:
+      user_id: UUID (authenticated from upstream)
+      task_id: UUID (task to update)
+      new_title: str (1-500 chars, non-empty)
+      db: AsyncSession (database session from agent)
+    output:
+      dict: Updated Task object serialized
+    errors:
+      TaskNotFoundError: Task not found or user doesn't own it
+      ValidationError: Invalid UUID or empty title
+      DatabaseError: Database update failed
+    example:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        task_id: "550e8400-e29b-41d4-a716-446655440000"
+        new_title: "buy almond milk"
+      output:
+        id: "550e8400-e29b-41d4-a716-446655440000"
+        title: "buy almond milk"
+        updated_at: "2026-02-07T10:35:00Z"
+
+---
+
+## Error Response Structure
+
+### Error Classes
+
+```python
+class MCPToolError(Exception):
+    """Base class for MCP tool errors."""
+    def __init__(self, message: str, details: Optional[dict] = None):
+        self.message = message
+        self.details = details or {}
+        super().__init__(self.message)
+
+class TaskNotFoundError(MCPToolError): pass
+class ValidationError(MCPToolError): pass
+class UnauthorizedError(MCPToolError): pass
+class DatabaseError(MCPToolError): pass
+```
+
+### Error Propagation
+
+```
+MCP Tool raises TaskNotFoundError
+    ↓
+Spec-4 Agent (tool_mapper.py) catches exception
+    ↓
+Agent extracts: error.__class__.__name__ + str(error)
+    ↓
+Agent (response_formatter.py) translates to user-friendly message
+    ↓
+User sees: "I couldn't find a task matching 'buy milk'"
+```
+
+---
+
+## Integration with Spec-4
+
+### Import Changes
+
+**Before** (Spec-4 with mocks):
+```python
+from .mocks.mock_mcp_tools import (
+    mock_add_task,
+    mock_list_tasks,
+    mock_complete_task,
+    mock_delete_task,
+    mock_update_task,
+)
+```
+
+**After** (Spec-5 real tools):
+```python
+from src.mcp.tools import (
+    add_task,
+    list_tasks,
+    complete_task,
+    delete_task,
+    update_task,
+)
+```
+
+### Database Session Injection
+
+**Agent Changes**:
+```python
+# tool_mapper.py
+async def invoke_tool(intent_result, user_id, tasks, db: AsyncSession):
+    # Pass db session to MCP tools
+    result = await add_task(user_id, task_title, db)
+```
+
+**Agent gets db session from FastAPI dependency injection** (existing pattern).
+
+---
+
+## Validation Rules Summary
+
+| Tool | Input Validation | Authorization | Output |
+|------|------------------|---------------|--------|
+| add_task | user_id (UUID), title (1-500 chars) | N/A (creates for user_id) | Task dict |
+| list_tasks | user_id (UUID), filter (enum) | Filter by user_id | List[Task dict] |
+| complete_task | user_id (UUID), task_id (UUID) | User owns task | Task dict |
+| delete_task | user_id (UUID), task_id (UUID) | User owns task | None |
+| update_task | user_id (UUID), task_id (UUID), new_title (1-500) | User owns task | Task dict |
+
+---
+
+## Dependencies
+
+- **Spec-1**: Task model, TaskService, TaskRepository, database session
+- **Spec-4**: Imports tools, passes database session, catches errors
+- **Spec-2**: user_id validated upstream (JWT)
+
+---
+
+## Notes
+
+- No new database tables or migrations needed
+- Reuses all existing Spec-1 infrastructure
+- Tools are stateless (no caching, no in-memory state)
+- Authorization delegated to TaskService (existing implementation)
+- Error classes match Spec-4 agent expectations exactly

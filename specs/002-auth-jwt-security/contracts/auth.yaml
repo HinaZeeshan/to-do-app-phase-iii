@@ -1,0 +1,175 @@
+openapi: 3.1.0
+info:
+  title: Authentication API
+  version: 1.0.0
+  description: User authentication endpoints using Better Auth
+
+paths:
+  /api/auth/signup:
+    post:
+      summary: Create new user account
+      operationId: signup
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+                  example: "user@example.com"
+                password:
+                  type: string
+                  minLength: 8
+                  example: "SecurePass123"
+      responses:
+        '201':
+          description: Account created successfully
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: "auth-token=<jwt>; HttpOnly; Secure; SameSite=Strict; Max-Age=86400"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                  token:
+                    type: string
+                    description: JWT access token
+        '400':
+          description: Invalid input (weak password, invalid email)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/login:
+    post:
+      summary: Authenticate existing user
+      operationId: login
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                  token:
+                    type: string
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many failed login attempts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/logout:
+    post:
+      summary: End user session
+      operationId: logout
+      tags: [Authentication]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: "auth-token=; HttpOnly; Secure; SameSite=Strict; Max-Age=0"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Logged out successfully"
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "AUTH_FAILED"
+            message:
+              type: string
+              example: "Invalid credentials"
+            details:
+              type: string
+              nullable: true
+        meta:
+          type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+            request_id:
+              type: string
+              format: uuid

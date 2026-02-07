@@ -1,0 +1,251 @@
+# MCP Tool Contracts
+# Expected interface for MCP tools (defined by Spec-5, documented here for agent coordination)
+
+mcp_tools:
+  description: |
+    MCP (Model Context Protocol) tools provide the exclusive interface for task operations.
+    Agent MUST use these tools for all task-related actions (no direct database access).
+    All tools enforce user-level authorization (user_id validation).
+
+  add_task:
+    description: Create a new task for the authenticated user
+    input:
+      user_id:
+        type: string
+        format: uuid
+        required: true
+        description: Authenticated user ID (must match JWT)
+      title:
+        type: string
+        required: true
+        min_length: 1
+        max_length: 500
+        description: Task title or description
+    output:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique task identifier
+        user_id:
+          type: string
+          format: uuid
+          description: Owner user ID
+        title:
+          type: string
+          description: Task title
+        is_completed:
+          type: boolean
+          description: Completion status (always false for new tasks)
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+    errors:
+      - ValidationError: "Title cannot be empty"
+      - UnauthorizedError: "User not authenticated"
+    example_call:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        title: "buy milk"
+      output:
+        id: "550e8400-e29b-41d4-a716-446655440000"
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        title: "buy milk"
+        is_completed: false
+        created_at: "2026-02-07T10:00:00Z"
+
+  list_tasks:
+    description: Retrieve all tasks for the authenticated user
+    input:
+      user_id:
+        type: string
+        format: uuid
+        required: true
+        description: Authenticated user ID (must match JWT)
+      filter:
+        type: string
+        required: false
+        enum: [all, pending, completed]
+        default: all
+        description: Filter tasks by completion status
+    output:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+            format: uuid
+          title:
+            type: string
+          is_completed:
+            type: boolean
+          created_at:
+            type: string
+            format: date-time
+    errors:
+      - UnauthorizedError: "User not authenticated"
+    example_call:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        filter: "pending"
+      output:
+        - id: "550e8400-e29b-41d4-a716-446655440000"
+          title: "buy milk"
+          is_completed: false
+          created_at: "2026-02-07T10:00:00Z"
+        - id: "660e8400-e29b-41d4-a716-446655440000"
+          title: "call dentist"
+          is_completed: false
+          created_at: "2026-02-07T10:05:00Z"
+
+  complete_task:
+    description: Mark a task as completed
+    input:
+      user_id:
+        type: string
+        format: uuid
+        required: true
+        description: Authenticated user ID (must match JWT and task owner)
+      task_id:
+        type: string
+        format: uuid
+        required: true
+        description: Task ID to complete
+    output:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        is_completed:
+          type: boolean
+          description: Always true after completion
+        completed_at:
+          type: string
+          format: date-time
+          description: Completion timestamp
+    errors:
+      - TaskNotFoundError: "Task not found"
+      - UnauthorizedError: "User does not own this task"
+    example_call:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        task_id: "550e8400-e29b-41d4-a716-446655440000"
+      output:
+        id: "550e8400-e29b-41d4-a716-446655440000"
+        title: "buy milk"
+        is_completed: true
+        completed_at: "2026-02-07T10:30:00Z"
+
+  delete_task:
+    description: Permanently delete a task
+    input:
+      user_id:
+        type: string
+        format: uuid
+        required: true
+        description: Authenticated user ID (must match JWT and task owner)
+      task_id:
+        type: string
+        format: uuid
+        required: true
+        description: Task ID to delete
+    output:
+      type: null
+      description: No response body on success (HTTP 204)
+    errors:
+      - TaskNotFoundError: "Task not found"
+      - UnauthorizedError: "User does not own this task"
+    example_call:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        task_id: "550e8400-e29b-41d4-a716-446655440000"
+      output: null
+
+  update_task:
+    description: Update task title or details
+    input:
+      user_id:
+        type: string
+        format: uuid
+        required: true
+        description: Authenticated user ID (must match JWT and task owner)
+      task_id:
+        type: string
+        format: uuid
+        required: true
+        description: Task ID to update
+      new_title:
+        type: string
+        required: true
+        min_length: 1
+        max_length: 500
+        description: New task title
+    output:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          description: Updated title
+        is_completed:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+          description: Update timestamp
+    errors:
+      - TaskNotFoundError: "Task not found"
+      - UnauthorizedError: "User does not own this task"
+      - ValidationError: "Title cannot be empty"
+    example_call:
+      input:
+        user_id: "123e4567-e89b-12d3-a456-426614174000"
+        task_id: "550e8400-e29b-41d4-a716-446655440000"
+        new_title: "buy almond milk"
+      output:
+        id: "550e8400-e29b-41d4-a716-446655440000"
+        title: "buy almond milk"
+        is_completed: false
+        updated_at: "2026-02-07T10:35:00Z"
+
+authorization:
+  requirement: |
+    All MCP tools MUST validate that the provided user_id matches the authenticated
+    user from the JWT token. This prevents unauthorized access to other users' tasks.
+
+  enforcement:
+    - user_id parameter passed to all tools
+    - Tools verify user_id matches authenticated JWT user
+    - Database queries filter by user_id (WHERE user_id = ?)
+    - Error on user_id mismatch: UnauthorizedError
+
+implementation_notes:
+  - MCP tools are implemented in Spec-5 (MCP Server & Chat Infrastructure)
+  - Tools wrap existing TaskService business logic with authorization checks
+  - Agent uses mock MCP tools during development (before Spec-5 integration)
+  - Mock tools simulate success/error responses for agent testing
+
+agent_integration:
+  tool_selection:
+    - Agent classifies user intent (CREATE_TASK, LIST_TASKS, etc.)
+    - Agent maps intent to MCP tool (add_task, list_tasks, etc.)
+    - Agent extracts parameters from user message (title, task_id, filter)
+    - Agent invokes tool with user_id + extracted parameters
+
+  response_handling:
+    - On success: Agent formats tool result into conversational response
+    - On error: Agent translates error message to user-friendly explanation
+    - Agent MUST NOT hallucinate task data (all data from tool responses only)
+
+  determinism:
+    - Identical inputs → identical tool invocations
+    - No randomness in parameter extraction
+    - Tool selection based on explicit intent classification rules

@@ -1,0 +1,126 @@
+# Integration Contract: MCP Tools (Spec-5) ↔ AI Agent (Spec-4)
+
+integration:
+  description: |
+    Defines how Spec-5 MCP tools integrate with Spec-4 AI agent.
+    Integration involves replacing mock tools with real tools in agent's tool_mapper.py.
+
+  current_state_spec4:
+    location: backend/src/agent/tool_mapper.py
+    mock_imports: |
+      from .mocks.mock_mcp_tools import (
+          mock_add_task,
+          mock_list_tasks,
+          mock_complete_task,
+          mock_delete_task,
+          mock_update_task,
+          TaskNotFoundError,
+          UnauthorizedError,
+          ValidationError,
+      )
+    invocation_pattern: |
+      result = await mock_add_task(user_id, task_title)
+
+  target_state_spec5:
+    location: backend/src/mcp/tools/
+    real_imports: |
+      from src.mcp.tools import (
+          add_task,
+          list_tasks,
+          complete_task,
+          delete_task,
+          update_task,
+      )
+      from src.mcp.errors import (
+          TaskNotFoundError,
+          UnauthorizedError,
+          ValidationError,
+          DatabaseError,
+      )
+    invocation_pattern: |
+      result = await add_task(user_id, task_title, db)
+
+  changes_required:
+    file: backend/src/agent/tool_mapper.py
+    modifications:
+      - action: Replace mock imports with real MCP tool imports
+        line_range: "~15-22"
+        before: "from .mocks.mock_mcp_tools import ..."
+        after: "from src.mcp.tools import ... ; from src.mcp.errors import ..."
+
+      - action: Add database session parameter to invoke_tool function
+        line_range: "~28"
+        before: "async def invoke_tool(intent_result, user_id, tasks)"
+        after: "async def invoke_tool(intent_result, user_id, tasks, db: AsyncSession)"
+
+      - action: Pass database session to all tool calls
+        line_range: "~50-90 (5 tool invocations)"
+        before: "result = await mock_add_task(user_id, task_title)"
+        after: "result = await add_task(user_id, task_title, db)"
+
+    file: backend/src/agent/chat_agent.py
+    modifications:
+      - action: Get database session from FastAPI dependency
+        line_range: "~20"
+        before: "async def run_agent(user_id, message, conversation_history)"
+        after: "async def run_agent(user_id, message, conversation_history, db: AsyncSession)"
+
+      - action: Pass database session to invoke_tool calls
+        line_range: "~76"
+        before: "tool_invocation = await invoke_tool(intent_result, user_id, tasks)"
+        after: "tool_invocation = await invoke_tool(intent_result, user_id, tasks, db)"
+
+  migration_steps:
+    - step: 1
+      action: Implement all 5 MCP tools in backend/src/mcp/tools/
+      validation: Tools pass unit tests with real database
+
+    - step: 2
+      action: Update tool_mapper.py imports (replace mocks with real tools)
+      validation: No import errors, type hints correct
+
+    - step: 3
+      action: Add db parameter to invoke_tool and run_agent functions
+      validation: Function signatures updated
+
+    - step: 4
+      action: Pass db session to all MCP tool calls
+      validation: All 5 tools receive database session
+
+    - step: 5
+      action: Run Spec-4 agent tests with real MCP tools
+      validation: All 23 agent tests pass with real database operations
+
+    - step: 6
+      action: Remove mock tools directory (backend/src/agent/mocks/)
+      validation: No dead code remains
+
+  error_handling:
+    compatibility: |
+      Spec-4 agent already handles these error types in tool_mapper.py and response_formatter.py.
+      No changes needed to agent error handling logic.
+
+    error_mapping:
+      TaskNotFoundError: "I couldn't find a task matching '{reference}'"
+      UnauthorizedError: "You need to be authenticated to perform this action"
+      ValidationError: "That input isn't valid: {details}"
+      DatabaseError: "I'm having trouble accessing your tasks right now. Please try again."
+
+  testing_strategy:
+    unit_tests: Test each MCP tool independently with test database
+    integration_tests: Test Spec-4 agent → MCP tools → database flow
+    migration_tests: Verify all 23 Spec-4 tests pass with real tools
+    performance_tests: Measure tool overhead (<50ms target)
+
+  rollback_plan:
+    if_integration_fails: |
+      1. Revert tool_mapper.py changes (restore mock imports)
+      2. Revert chat_agent.py changes (remove db parameter)
+      3. Spec-4 agent continues working with mocks
+      4. Debug MCP tool issues independently
+      5. Retry integration after fixes
+
+  performance_requirements:
+    tool_overhead: <50ms (tool logic excluding database query time)
+    list_tasks_p95: <200ms (including database query)
+    database_session: Reuse existing FastAPI session management (no new connections)

@@ -1,0 +1,172 @@
+# Agent Interface Contract
+# Defines how Spec-5 (Chat Infrastructure) invokes the AI Chat Agent
+
+agent_interface:
+  function_name: run_agent
+  description: |
+    Execute the AI chat agent with a user message and conversation history.
+    Returns a user-facing response and metadata about tool invocations.
+
+  input:
+    user_id:
+      type: string
+      format: uuid
+      required: true
+      description: Authenticated user ID from JWT token
+      example: "123e4567-e89b-12d3-a456-426614174000"
+
+    message:
+      type: string
+      required: true
+      min_length: 1
+      max_length: 2000
+      description: Current user message to process
+      example: "remind me to buy milk"
+
+    conversation_history:
+      type: array
+      required: false
+      default: []
+      max_items: 50
+      description: Previous messages in this conversation
+      items:
+        type: object
+        properties:
+          role:
+            type: string
+            enum: [user, assistant, system]
+            description: Message sender role
+          content:
+            type: string
+            description: Message text
+          timestamp:
+            type: string
+            format: date-time
+            description: ISO 8601 timestamp (optional)
+      example:
+        - role: user
+          content: "what are my tasks?"
+          timestamp: "2026-02-07T10:00:00Z"
+        - role: assistant
+          content: "You don't have any tasks yet."
+          timestamp: "2026-02-07T10:00:01Z"
+
+  output:
+    response_text:
+      type: string
+      required: true
+      description: User-facing conversational response
+      example: "I've added 'buy milk' to your tasks"
+
+    tool_invocations:
+      type: array
+      required: true
+      description: MCP tools called during this request
+      items:
+        type: object
+        properties:
+          tool_name:
+            type: string
+            description: MCP tool identifier
+            example: "add_task"
+          parameters:
+            type: object
+            description: Arguments passed to tool
+            example:
+              user_id: "123e4567-e89b-12d3-a456-426614174000"
+              title: "buy milk"
+          result:
+            type: object
+            nullable: true
+            description: Tool response on success
+            example:
+              id: "550e8400-e29b-41d4-a716-446655440000"
+              title: "buy milk"
+              is_completed: false
+          error:
+            type: string
+            nullable: true
+            description: Error message if tool failed
+            example: "Task not found"
+          duration_ms:
+            type: integer
+            nullable: true
+            description: Tool execution time in milliseconds
+            example: 45
+
+    metadata:
+      type: object
+      required: true
+      description: Additional context and debugging information
+      properties:
+        intent:
+          type: string
+          description: Recognized user intent
+          example: "CREATE_TASK"
+        processing_time_ms:
+          type: integer
+          description: Total agent processing time
+          example: 312
+        confidence:
+          type: number
+          format: float
+          description: Intent classification confidence (0.0-1.0)
+          example: 0.95
+
+  errors:
+    - name: ValidationError
+      status_code: 400
+      description: Invalid input (empty message, malformed UUID)
+      example:
+        error: "ValidationError"
+        message: "Message cannot be empty"
+
+    - name: UnauthorizedError
+      status_code: 401
+      description: User not authenticated
+      example:
+        error: "UnauthorizedError"
+        message: "Authentication required"
+
+    - name: AgentExecutionError
+      status_code: 500
+      description: Internal agent error
+      example:
+        error: "AgentExecutionError"
+        message: "Failed to process request"
+
+  performance_targets:
+    agent_processing_time: "< 500ms (excluding MCP tool latency)"
+    end_to_end_response_time: "< 2 seconds (including tool execution)"
+
+  determinism:
+    guarantee: |
+      Identical inputs (user_id, message, conversation_history) MUST produce
+      identical outputs (response_text, tool_invocations) 100% of the time.
+      This is a constitutional requirement for Phase III agents.
+
+    testing:
+      - Run identical request 10 times
+      - Verify response_text is identical
+      - Verify tool_invocations are identical (tool_name, parameters)
+      - Verify no randomness in parameter extraction
+
+  usage_example:
+    python: |
+      from backend.src.agent.chat_agent import run_agent
+      from uuid import UUID
+
+      # Invoked by Spec-5 chat infrastructure
+      response = await run_agent(
+          user_id=UUID("123e4567-e89b-12d3-a456-426614174000"),
+          message="remind me to buy milk",
+          conversation_history=[
+              {"role": "user", "content": "what are my tasks?"},
+              {"role": "assistant", "content": "You don't have any tasks yet."}
+          ]
+      )
+
+      # Returns AgentResponse
+      print(response.response_text)  # "I've added 'buy milk' to your tasks"
+      print(response.tool_invocations[0].tool_name)  # "add_task"
+      print(response.metadata["intent"])  # "CREATE_TASK"
